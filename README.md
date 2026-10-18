@@ -120,7 +120,9 @@ pytest -q
 ### Getting listed in the HACS default store (optional, later)
 
 - Add a description and topics (e.g. `home-assistant`, `hacs`, `homeassistant-integration`) to the GitHub repository.
-- Submit the icon to [home-assistant/brands](https://github.com/home-assistant/brands) and remove `ignore: brands` from `.github/workflows/validate.yaml`.
+- Add a LICENSE file (HACS requires one for the default store).
+- Submit the icon to [home-assistant/brands](https://github.com/home-assistant/brands).
+- Remove `ignore: brands license topics` from `.github/workflows/validate.yaml`.
 - Make sure the Validate workflow is green and at least one release exists.
 - Open a pull request to [hacs/default](https://github.com/hacs/default).
 
