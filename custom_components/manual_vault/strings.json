@@ -16,5 +16,29 @@
         "name": "Manual"
       }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Hidden devices",
+        "description": "Hidden devices don't appear in the Manual Vault device list and don't count as missing a manual. Devices that already have a manual keep their Manual sensor. You can also hide things with the eye icon in the panel.",
+        "data": {
+          "integrations": "Hide everything from these integrations",
+          "models": "Hide these models",
+          "devices": "Hide these devices"
+        },
+        "data_description": {
+          "integrations": "For example phones (Mobile App) and system sensors (System Monitor).",
+          "models": "Hides every device of the model, including ones added later.",
+          "devices": "Hides only these specific devices."
+        }
+      }
+    },
+    "error": {
+      "backup_running": "A backup is running. Try again in a moment."
+    },
+    "abort": {
+      "not_loaded": "Manual Vault is not loaded."
+    }
   }
 }

@@ -9,7 +9,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from .const import DOMAIN, MAX_FILE_SIZE
+from .const import DOMAIN, HIDE_DEVICE, HIDE_INTEGRATION, HIDE_MODEL, MAX_FILE_SIZE
 from .vault import ManualVault, VaultError, clean_devices, clean_tags
 
 
@@ -19,6 +19,8 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_library)
     websocket_api.async_register_command(hass, ws_update)
     websocket_api.async_register_command(hass, ws_delete)
+    websocket_api.async_register_command(hass, ws_hide)
+    websocket_api.async_register_command(hass, ws_card)
 
 
 def _get_vault(
@@ -96,3 +98,57 @@ async def ws_delete(
         connection.send_error(msg["id"], err.code, str(err))
         return
     connection.send_result(msg["id"])
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "manual_vault/hide",
+        vol.Required("kind"): vol.In([HIDE_DEVICE, HIDE_MODEL, HIDE_INTEGRATION]),
+        vol.Required("hidden"): bool,
+        vol.Optional("device_id"): str,
+        vol.Optional("manufacturer"): str,
+        vol.Optional("model"): str,
+        vol.Optional("integration"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_hide(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Hide or unhide a device, model or integration from the device list."""
+    if (vault := _get_vault(hass, connection, msg["id"])) is None:
+        return
+    try:
+        await vault.async_set_hidden(
+            msg["kind"],
+            msg["hidden"],
+            device_id=msg.get("device_id"),
+            manufacturer=msg.get("manufacturer"),
+            model=msg.get("model"),
+            integration=msg.get("integration"),
+        )
+    except VaultError as err:
+        connection.send_error(msg["id"], err.code, str(err))
+        return
+    connection.send_result(msg["id"], {"hidden": vault.hidden})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "manual_vault/card",
+        vol.Exclusive("device_id", "target"): str,
+        vol.Exclusive("area_id", "target"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_card(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Manuals for one device or an area, for the dashboard card."""
+    if (vault := _get_vault(hass, connection, msg["id"])) is None:
+        return
+    connection.send_result(
+        msg["id"],
+        await vault.async_card_payload(msg.get("device_id"), msg.get("area_id")),
+    )

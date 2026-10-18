@@ -305,9 +305,168 @@ async def test_panel_served(hass: HomeAssistant, hass_client) -> None:
     await _setup(hass)
     panel = hass.data["frontend_panels"]["manual-vault"]
     module_url = panel.config["_panel_custom"]["module_url"]
-    assert module_url.startswith("/manual_vault_static/manual-vault-panel.js?v=0.1.0")
+    assert module_url.startswith("/manual_vault_static/manual-vault-panel.js?v=")
     assert panel.require_admin is False
     client = await hass_client()
     resp = await client.get(module_url)
     assert resp.status == 200
     assert "customElements.define" in await resp.text()
+
+
+# ----------------------------------------------------------------- v0.2.0
+
+
+def _extra_devices(hass: HomeAssistant) -> tuple[dr.DeviceEntry, dr.DeviceEntry]:
+    phone_entry = MockConfigEntry(domain="mobile_app")
+    phone_entry.add_to_hass(hass)
+    sysmon = MockConfigEntry(domain="systemmonitor")
+    sysmon.add_to_hass(hass)
+    reg = dr.async_get(hass)
+    phone = reg.async_get_or_create(
+        config_entry_id=phone_entry.entry_id,
+        identifiers={("mobile_app", "p1")},
+        manufacturer="Google",
+        model="Pixel 9",
+        name="Phone",
+    )
+    cpu = reg.async_get_or_create(
+        config_entry_id=sysmon.entry_id,
+        identifiers={("systemmonitor", "cpu")},
+        name="CPU",
+    )
+    return phone, cpu
+
+
+async def _library(ws) -> dict:
+    await ws.send_json_auto_id({"type": "manual_vault/library"})
+    res = await ws.receive_json()
+    assert res["success"], res
+    return res["result"]
+
+
+async def test_hidden_defaults_and_toggle(hass: HomeAssistant, hass_ws_client) -> None:
+    switch1, switch2, tuya = _devices(hass)
+    phone, cpu = _extra_devices(hass)
+    await _setup(hass)
+    ws = await hass_ws_client(hass)
+
+    lib = await _library(ws)
+    devs = {d["id"]: d for d in lib["devices"]}
+    assert devs[phone.id]["hidden"] == "integration"
+    assert devs[cpu.id]["hidden"] == "integration"
+    assert devs[switch1.id]["hidden"] is None
+    assert "mobile_app" in lib["hidden"]["integrations"]
+
+    # hide one device
+    await ws.send_json_auto_id({"type": "manual_vault/hide", "kind": "device", "hidden": True, "device_id": tuya.id})
+    assert (await ws.receive_json())["success"]
+    # hide a model (case-insensitive, covers every device of that model)
+    await ws.send_json_auto_id({"type": "manual_vault/hide", "kind": "model", "hidden": True, "manufacturer": "moes", "model": "zbm5-1c"})
+    assert (await ws.receive_json())["success"]
+    # unhide an integration
+    await ws.send_json_auto_id({"type": "manual_vault/hide", "kind": "integration", "hidden": False, "integration": "mobile_app"})
+    assert (await ws.receive_json())["success"]
+
+    devs = {d["id"]: d for d in (await _library(ws))["devices"]}
+    assert devs[tuya.id]["hidden"] == "device"
+    assert devs[switch1.id]["hidden"] == "model"
+    assert devs[switch2.id]["hidden"] is None  # different model string
+    assert devs[phone.id]["hidden"] is None
+
+    # unhide again
+    await ws.send_json_auto_id({"type": "manual_vault/hide", "kind": "model", "hidden": False, "manufacturer": "Moes", "model": "ZBM5-1C"})
+    assert (await ws.receive_json())["success"]
+    devs = {d["id"]: d for d in (await _library(ws))["devices"]}
+    assert devs[switch1.id]["hidden"] is None
+
+    # persisted, and removed devices are forgotten
+    dr.async_get(hass).async_remove_device(tuya.id)
+    await hass.async_block_till_done()
+    assert tuya.id not in hass.data[DOMAIN].hidden["devices"]
+
+
+async def test_hidden_device_keeps_sensor(hass: HomeAssistant, hass_client, hass_ws_client) -> None:
+    switch1, _s2, _t = _devices(hass)
+    entry = await _setup(hass)
+    client = await hass_client()
+    await client.post("/api/manual_vault/upload", data=_form("Moes", [{"model": "ZBM5-1C"}]))
+    ws = await hass_ws_client(hass)
+    await ws.send_json_auto_id({"type": "manual_vault/hide", "kind": "device", "hidden": True, "device_id": switch1.id})
+    assert (await ws.receive_json())["success"]
+    await hass.async_block_till_done()
+    ent = _manual_entities(hass, entry)[switch1.id]
+    assert hass.states.get(ent).attributes["panel"] == f"/manual-vault?device={switch1.id}"
+
+
+async def test_hide_read_only_rejected(hass: HomeAssistant, hass_ws_client, hass_read_only_access_token) -> None:
+    await _setup(hass)
+    ws = await hass_ws_client(hass, hass_read_only_access_token)
+    await ws.send_json_auto_id({"type": "manual_vault/hide", "kind": "integration", "hidden": True, "integration": "zha"})
+    assert (await ws.receive_json())["error"]["code"] == "unauthorized"
+
+
+async def test_options_flow(hass: HomeAssistant) -> None:
+    switch1, _s2, tuya = _devices(hass)
+    phone, _cpu = _extra_devices(hass)
+    entry = await _setup(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] is FlowResultType.FORM
+    schema = result["data_schema"].schema
+    defaults = {str(k): k.default() for k in schema}
+    assert "mobile_app" in defaults["integrations"]
+    model_opts = {o["label"]: o["value"] for o in next(v for k, v in schema.items() if str(k) == "models").config["options"]}
+    integ_opts = {o["value"] for o in next(v for k, v in schema.items() if str(k) == "integrations").config["options"]}
+    assert {"zha", "mobile_app", "systemmonitor"} <= integ_opts
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {"integrations": ["systemmonitor"], "models": [model_opts["Moes ZBM5-1C"]], "devices": [tuya.id]},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    hidden = hass.data[DOMAIN].hidden
+    assert hidden == {
+        "devices": [tuya.id],
+        "models": [{"manufacturer": "Moes", "model": "ZBM5-1C"}],
+        "integrations": ["systemmonitor"],
+    }
+    vault = hass.data[DOMAIN]
+    assert vault.hidden_reason(dr.async_get(hass).async_get(phone.id)) is None
+    assert vault.hidden_reason(dr.async_get(hass).async_get(switch1.id)) == "model"
+
+    # survives a reload
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.data[DOMAIN].hidden["integrations"] == ["systemmonitor"]
+
+
+async def test_card_payload_and_script(hass: HomeAssistant, hass_client, hass_ws_client) -> None:
+    switch1, switch2, tuya = _devices(hass)
+    phone, _cpu = _extra_devices(hass)
+    ar_reg = __import__("homeassistant.helpers.area_registry", fromlist=["x"]).async_get(hass)
+    kitchen = ar_reg.async_create("Kitchen")
+    reg = dr.async_get(hass)
+    for dev in (switch1, tuya, phone):
+        reg.async_update_device(dev.id, area_id=kitchen.id)
+    await _setup(hass)
+    client = await hass_client()
+    resp = await client.post("/api/manual_vault/upload", data=_form("Moes", [{"model": "ZBM5-1C"}]))
+    manual_id = (await resp.json())["manual"]["id"]
+
+    ws = await hass_ws_client(hass)
+    await ws.send_json_auto_id({"type": "manual_vault/card", "device_id": switch1.id})
+    res = (await ws.receive_json())["result"]
+    assert res["devices"][0]["manuals"] == [
+        {"id": manual_id, "title": "Moes", "file": "Moes-ZBM5.pdf", "missing": False}
+    ]
+
+    # area: phone is hidden (mobile_app) and has no manual -> left out
+    await ws.send_json_auto_id({"type": "manual_vault/card", "area_id": kitchen.id})
+    res = (await ws.receive_json())["result"]
+    assert [d["name"] for d in res["devices"]] == ["Kitchen switch", "Thermostat"]
+
+    # card script is registered and served
+    from homeassistant.components.frontend import DATA_EXTRA_MODULE_URL
+    urls = list(hass.data[DATA_EXTRA_MODULE_URL].urls)
+    card = next(u for u in urls if "manual-vault-card.js" in u)
+    resp = await client.get(card)
+    assert resp.status == 200

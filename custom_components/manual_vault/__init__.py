@@ -77,6 +77,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ManualVaultConfigEntry) 
         require_admin=False,
         config={"version": version},
     )
+    card_url = f"{STATIC_URL}/manual-vault-card.js?v={version}"
+    frontend.add_extra_js_url(hass, card_url)
+    entry.async_on_unload(lambda: frontend.remove_extra_js_url(hass, card_url))
 
     pending: list = []
 
@@ -87,8 +90,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ManualVaultConfigEntry) 
 
     @callback
     def _device_changed(event: Event[dr.EventDeviceRegistryUpdatedData]) -> None:
-        if event.data["action"] == "remove" and vault.async_forget_device(
-            event.data["device_id"]
+        if event.data["action"] == "remove" and (
+            vault.async_forget_device(event.data["device_id"])
+            | vault.async_forget_hidden_device(event.data["device_id"])
         ):
             entry.async_create_background_task(
                 hass, vault.async_save(), "manual_vault_save"

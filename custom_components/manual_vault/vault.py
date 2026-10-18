@@ -21,7 +21,11 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     ALLOWED_EXTENSIONS,
+    DEFAULT_HIDDEN_INTEGRATIONS,
     FOLDER_NAME,
+    HIDE_DEVICE,
+    HIDE_INTEGRATION,
+    HIDE_MODEL,
     MATCH_DEVICE,
     MATCH_MODEL,
     SIGNAL_UPDATED,
@@ -111,6 +115,20 @@ def is_eligible_device(device: dr.DeviceEntry) -> bool:
     return device.entry_type is None and device.disabled_by is None
 
 
+def model_key(manufacturer: str | None, model: str | None) -> tuple[str, str]:
+    """Normalised (manufacturer, model) pair used to group and hide models."""
+    return (_norm(manufacturer), _norm(model))
+
+
+def default_hidden() -> dict[str, list[Any]]:
+    """Hidden settings for a fresh install."""
+    return {
+        "devices": [],
+        "models": [],
+        "integrations": list(DEFAULT_HIDDEN_INTEGRATIONS),
+    }
+
+
 class ManualVault:
     """Owns the manual library and its folder."""
 
@@ -121,6 +139,7 @@ class ManualVault:
             hass, STORAGE_VERSION, STORAGE_KEY, atomic_writes=True
         )
         self.manuals: dict[str, dict[str, Any]] = {}
+        self.hidden: dict[str, list[Any]] = default_hidden()
         # Held while files and the library are being changed; backups wait on it.
         self.lock = asyncio.Lock()
         self.backup_running = False
@@ -131,11 +150,15 @@ class ManualVault:
         """Load the library from storage and sync with the folder."""
         data = await self._store.async_load() or {}
         self.manuals = data.get("manuals", {})
+        if "hidden" in data:
+            self.hidden = {**default_hidden(), **data["hidden"]}
         await self.hass.async_add_executor_job(self.folder.mkdir, 0o755, True, True)
         await self.async_scan()
 
     async def _async_save(self) -> None:
-        await self._store.async_save({"manuals": self.manuals})
+        await self._store.async_save(
+            {"manuals": self.manuals, "hidden": self.hidden}
+        )
         async_dispatcher_send(self.hass, SIGNAL_UPDATED)
 
     def _ensure_writable(self) -> None:
@@ -334,6 +357,137 @@ class ManualVault:
         async with self.lock:
             await self._async_save()
 
+    # ---------------------------------------------------------------- hiding
+
+    def device_domain(self, device: dr.DeviceEntry) -> str:
+        """Domain of the integration that owns a device."""
+        entry_id = device.primary_config_entry or next(
+            iter(device.config_entries), None
+        )
+        entry = self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
+        return entry.domain if entry else ""
+
+    @callback
+    def hidden_reason(self, device: dr.DeviceEntry, domain: str | None = None) -> str | None:
+        """Why a device is hidden from the list, or None."""
+        if device.id in self.hidden["devices"]:
+            return HIDE_DEVICE
+        key = model_key(device.manufacturer, device.model)
+        if any(model_key(m["manufacturer"], m["model"]) == key for m in self.hidden["models"]):
+            return HIDE_MODEL
+        if (domain if domain is not None else self.device_domain(device)) in self.hidden[
+            "integrations"
+        ]:
+            return HIDE_INTEGRATION
+        return None
+
+    async def async_set_hidden(
+        self,
+        kind: str,
+        hidden: bool,
+        *,
+        device_id: str | None = None,
+        manufacturer: str | None = None,
+        model: str | None = None,
+        integration: str | None = None,
+    ) -> None:
+        """Hide or unhide one device, model or integration."""
+        async with self.lock:
+            self._ensure_writable()
+            if kind == HIDE_DEVICE:
+                if not device_id:
+                    raise VaultError("invalid", "device_id is required")
+                items = self.hidden["devices"]
+                if hidden and device_id not in items:
+                    items.append(device_id)
+                elif not hidden and device_id in items:
+                    items.remove(device_id)
+            elif kind == HIDE_MODEL:
+                key = model_key(manufacturer, model)
+                rest = [
+                    m for m in self.hidden["models"]
+                    if model_key(m["manufacturer"], m["model"]) != key
+                ]
+                if hidden:
+                    rest.append({"manufacturer": manufacturer or "", "model": model or ""})
+                self.hidden["models"] = rest
+            elif kind == HIDE_INTEGRATION:
+                if not integration:
+                    raise VaultError("invalid", "integration is required")
+                items = self.hidden["integrations"]
+                if hidden and integration not in items:
+                    items.append(integration)
+                elif not hidden and integration in items:
+                    items.remove(integration)
+            else:
+                raise VaultError("invalid", f"Unknown kind: {kind}")
+            await self._async_save()
+
+    async def async_replace_hidden(
+        self,
+        devices: list[str],
+        models: list[dict[str, str]],
+        integrations: list[str],
+    ) -> None:
+        """Replace all hidden settings at once (options flow)."""
+        async with self.lock:
+            self._ensure_writable()
+            self.hidden = {
+                "devices": list(dict.fromkeys(devices)),
+                "models": models,
+                "integrations": sorted(set(integrations)),
+            }
+            await self._async_save()
+
+    @callback
+    def async_forget_hidden_device(self, device_id: str) -> bool:
+        """Drop a removed device from the hidden list."""
+        if device_id in self.hidden["devices"]:
+            self.hidden["devices"].remove(device_id)
+            return True
+        return False
+
+    # ------------------------------------------------------------------ card
+
+    async def async_card_payload(
+        self, device_id: str | None = None, area_id: str | None = None
+    ) -> dict[str, Any]:
+        """Manuals for one device or every device in an area (dashboard card)."""
+        files = await self.hass.async_add_executor_job(self._list_folder)
+        dev_reg = dr.async_get(self.hass)
+        if device_id:
+            device = dev_reg.async_get(device_id)
+            candidates = [device] if device else []
+        elif area_id:
+            candidates = [
+                d for d in dr.async_entries_for_area(dev_reg, area_id)
+                if is_eligible_device(d)
+            ]
+        else:
+            candidates = []
+        result = []
+        for device in candidates:
+            match = self.match_device(device)
+            if area_id and match is None and self.hidden_reason(device):
+                continue
+            result.append(
+                {
+                    "id": device.id,
+                    "name": device.name_by_user or device.name or "",
+                    "manuals": [
+                        {
+                            "id": m["id"],
+                            "title": m["title"],
+                            "file": m["file"],
+                            "missing": m["file"] not in files,
+                        }
+                        for m in (self.manuals[i] for i in (match.manual_ids if match else []))
+                    ],
+                }
+            )
+        result.sort(key=lambda d: d["name"].casefold())
+        return {"devices": result}
+
     # --------------------------------------------------------------- matching
 
     @callback
@@ -377,14 +531,7 @@ class ManualVault:
         for device in dev_reg.devices.values():
             if not is_eligible_device(device):
                 continue
-            entry_id = device.primary_config_entry or next(
-                iter(device.config_entries), None
-            )
-            entry = (
-                self.hass.config_entries.async_get_entry(entry_id)
-                if entry_id
-                else None
-            )
+            domain = self.device_domain(device)
             area = area_reg.async_get_area(device.area_id) if device.area_id else None
             match = self.match_device(device)
             devices.append(
@@ -394,14 +541,16 @@ class ManualVault:
                     "manufacturer": device.manufacturer or "",
                     "model": device.model or "",
                     "model_id": device.model_id or "",
-                    "integration": entry.domain if entry else "",
+                    "integration": domain,
                     "area": area.name if area else "",
+                    "area_id": device.area_id or "",
+                    "hidden": self.hidden_reason(device, domain),
                     "manuals": match.manual_ids if match else [],
                     "match": match.match if match else None,
                 }
             )
         devices.sort(key=lambda d: (d["manufacturer"].casefold(), d["model"].casefold(), d["name"].casefold()))
-        return {"manuals": manuals, "devices": devices}
+        return {"manuals": manuals, "devices": devices, "hidden": self.hidden}
 
 
 def _unlink(path: Path) -> None:

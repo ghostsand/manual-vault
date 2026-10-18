@@ -16,5 +16,29 @@
         "name": "Handleiding"
       }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Verborgen apparaten",
+        "description": "Verborgen apparaten staan niet in de apparatenlijst van Manual Vault en tellen niet mee als 'handleiding ontbreekt'. Apparaten die al een handleiding hebben, houden hun Handleiding-sensor. Je kunt ook verbergen met het oog-icoon in het paneel.",
+        "data": {
+          "integrations": "Alles van deze integraties verbergen",
+          "models": "Deze modellen verbergen",
+          "devices": "Deze apparaten verbergen"
+        },
+        "data_description": {
+          "integrations": "Bijvoorbeeld telefoons (Mobile App) en systeemsensoren (System Monitor).",
+          "models": "Verbergt elk apparaat van dit model, ook apparaten die later worden toegevoegd.",
+          "devices": "Verbergt alleen deze specifieke apparaten."
+        }
+      }
+    },
+    "error": {
+      "backup_running": "Er loopt een backup. Probeer het zo opnieuw."
+    },
+    "abort": {
+      "not_loaded": "Manual Vault is niet geladen."
+    }
   }
 }

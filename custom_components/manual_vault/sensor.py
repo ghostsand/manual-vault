@@ -104,7 +104,7 @@ class ManualSensor(SensorEntity):
                 for m in manuals
             ],
             "linked_by": match.match,
-            "panel": f"/{PANEL_URL_PATH}",
+            "panel": f"/{PANEL_URL_PATH}?device={self._device_id}",
             "integration": DOMAIN,
         }
         if write:

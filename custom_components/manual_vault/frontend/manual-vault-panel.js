@@ -24,6 +24,11 @@ const ICONS = {
   book: "M19 2L14 6.5V17.5L19 13V2M6.5 5C4.55 5 2.45 5.4 1 6.5V21.16C1 21.41 1.25 21.66 1.5 21.66C1.6 21.66 1.65 21.59 1.75 21.59C3.1 20.94 5.05 20.5 6.5 20.5C8.45 20.5 10.55 20.9 12 22C13.35 21.15 15.8 20.5 17.5 20.5C19.15 20.5 20.85 20.81 22.25 21.56C22.35 21.61 22.4 21.59 22.5 21.59C22.75 21.59 23 21.34 23 21.09V6.5C22.4 6.05 21.75 5.75 21 5.5V19C19.9 18.65 18.7 18.5 17.5 18.5C15.8 18.5 13.35 19.15 12 20V6.5C10.55 5.4 8.45 5 6.5 5Z",
 };
 
+ICONS.eyeOff =
+  "M11.83,9L15,12.16C15,12.11 15,12.05 15,12A3,3 0 0,0 12,9C11.94,9 11.89,9 11.83,9M7.53,9.8L9.08,11.35C9.03,11.56 9,11.77 9,12A3,3 0 0,0 12,15C12.22,15 12.44,14.97 12.65,14.92L14.2,16.47C13.53,16.8 12.79,17 12,17A5,5 0 0,1 7,12C7,11.21 7.2,10.47 7.53,9.8M2,4.27L4.28,6.55L4.73,7C3.08,8.3 1.78,10 1,12C2.73,16.39 7,19.5 12,19.5C13.55,19.5 15.03,19.2 16.38,18.66L16.81,19.08L19.73,22L21,20.73L3.27,3M12,7A5,5 0 0,1 17,12C17,12.64 16.87,13.26 16.64,13.82L19.57,16.75C21.07,15.5 22.27,13.86 23,12C21.27,7.61 17,4.5 12,4.5C10.6,4.5 9.26,4.75 8,5.2L10.17,7.35C10.74,7.13 11.35,7 12,7Z";
+ICONS.eye =
+  "M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z";
+
 const STRINGS = {
   en: {
     devices: "Devices",
@@ -83,6 +88,22 @@ const STRINGS = {
     matched: (n) => (n === 1 ? "used by 1 device" : `used by ${n} devices`),
     error: "Something went wrong",
     uploading: "Uploading…",
+    hidden: "Hidden",
+    hide: "Hide",
+    hide_title: "Hide from the list",
+    hide_device: "Hide this device",
+    hide_model: (m) => `All ${m} devices`,
+    hide_model_help: "Including devices of this model added later.",
+    hide_integration: (i) => `Everything from ${i}`,
+    hide_integration_help: "Every device of this integration.",
+    hide_help: "Hidden devices don't count as missing a manual. A device that already has a manual keeps its Manual sensor. You can also manage this under Settings → Devices & services → Manual Vault → Configure.",
+    unhide: "Unhide",
+    reason_device: "hidden device",
+    reason_model: "hidden model",
+    reason_integration: (i) => `hidden integration: ${i}`,
+    unhide_integration: (i) => `Unhide everything from ${i}`,
+    unhide_model: "Unhide this model",
+    empty_hidden: "Nothing is hidden.",
   },
   nl: {
     devices: "Apparaten",
@@ -142,6 +163,22 @@ const STRINGS = {
     matched: (n) => (n === 1 ? "gebruikt door 1 apparaat" : `gebruikt door ${n} apparaten`),
     error: "Er ging iets mis",
     uploading: "Uploaden…",
+    hidden: "Verborgen",
+    hide: "Verbergen",
+    hide_title: "Verbergen uit de lijst",
+    hide_device: "Dit apparaat verbergen",
+    hide_model: (m) => `Alle ${m}-apparaten`,
+    hide_model_help: "Ook apparaten van dit model die later worden toegevoegd.",
+    hide_integration: (i) => `Alles van ${i}`,
+    hide_integration_help: "Elk apparaat van deze integratie.",
+    hide_help: "Verborgen apparaten tellen niet mee als 'handleiding ontbreekt'. Een apparaat dat al een handleiding heeft, houdt zijn Handleiding-sensor. Je kunt dit ook beheren via Instellingen → Apparaten & diensten → Manual Vault → Configureren.",
+    unhide: "Zichtbaar maken",
+    reason_device: "verborgen apparaat",
+    reason_model: "verborgen model",
+    reason_integration: (i) => `verborgen integratie: ${i}`,
+    unhide_integration: (i) => `Alles van ${i} zichtbaar maken`,
+    unhide_model: "Dit model zichtbaar maken",
+    empty_hidden: "Er is niets verborgen.",
   },
 };
 
@@ -193,7 +230,37 @@ class ManualVaultPanel extends HTMLElement {
   }
 
   connectedCallback() {
+    this._deepLinked = null;
+    this._onLocation = () => this._checkDeepLink();
+    window.addEventListener("location-changed", this._onLocation);
+    window.addEventListener("popstate", this._onLocation);
     if (this._hass && this._built) this._load();
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener("location-changed", this._onLocation);
+    window.removeEventListener("popstate", this._onLocation);
+  }
+
+  _checkDeepLink() {
+    if (!this._data) return;
+    const id = new URLSearchParams(window.location.search).get("device");
+    if (!id || id === this._deepLinked) return;
+    this._deepLinked = id;
+    const dev = this._deviceById.get(id);
+    if (!dev) return;
+    const groups = dev.hidden ? this._hiddenGroups : this._groups;
+    const group = groups.find((g) => g.devices.includes(dev));
+    this._tab = "devices";
+    this._filter = dev.hidden ? "hidden" : "all";
+    this._search = "";
+    const search = this.shadowRoot.querySelector(".search");
+    if (search) search.value = "";
+    if (group) this._expanded.add(group.key);
+    this._highlight = id;
+    this._render();
+    const row = [...this.shadowRoot.querySelectorAll("[data-device-row]")].find((el) => el.dataset.deviceRow === id);
+    if (row && row.scrollIntoView) row.scrollIntoView({ block: "center", behavior: "smooth" });
   }
 
   get _t() {
@@ -215,6 +282,7 @@ class ManualVaultPanel extends HTMLElement {
       this._data = await this._hass.callWS({ type: "manual_vault/library" });
       this._index();
       this._render();
+      this._checkDeepLink();
     } catch (err) {
       this._toast(this._errorText(err), true);
     } finally {
@@ -232,10 +300,27 @@ class ManualVaultPanel extends HTMLElement {
     for (const dev of d.devices) {
       for (const id of dev.manuals) this._usage.set(id, (this._usage.get(id) || 0) + 1);
     }
+    this._groups = this._buildGroups(d.devices.filter((dev) => !dev.hidden), "");
+    this._hiddenGroups = this._buildGroups(d.devices.filter((dev) => dev.hidden), "h:");
+    // known models for the tag picker
+    const models = new Map();
+    for (const dev of d.devices) {
+      for (const model of [dev.model, dev.model_id]) {
+        if (!model) continue;
+        const key = `${norm(dev.manufacturer)}|${norm(model)}`;
+        if (!models.has(key)) models.set(key, { manufacturer: dev.manufacturer, model });
+      }
+    }
+    this._knownModels = [...models.values()].sort((a, b) =>
+      tagLabel(a).localeCompare(tagLabel(b), undefined, { sensitivity: "base" })
+    );
+  }
+
+  _buildGroups(devices, prefix) {
     // group devices by manufacturer + model
     const groups = new Map();
-    for (const dev of d.devices) {
-      const key = `${norm(dev.manufacturer)}|${norm(dev.model)}`;
+    for (const dev of devices) {
+      const key = `${prefix}${norm(dev.manufacturer)}|${norm(dev.model)}`;
       let group = groups.get(key);
       if (!group) {
         group = { key, manufacturer: dev.manufacturer, model: dev.model, model_ids: new Set(), devices: [], integrations: new Set() };
@@ -251,19 +336,11 @@ class ManualVaultPanel extends HTMLElement {
       group.manuals = [...ids];
       group.missing = group.devices.filter((dev) => dev.manuals.length === 0).length;
     }
-    this._groups = [...groups.values()];
-    // known models for the tag picker
-    const models = new Map();
-    for (const dev of d.devices) {
-      for (const model of [dev.model, dev.model_id]) {
-        if (!model) continue;
-        const key = `${norm(dev.manufacturer)}|${norm(model)}`;
-        if (!models.has(key)) models.set(key, { manufacturer: dev.manufacturer, model });
-      }
-    }
-    this._knownModels = [...models.values()].sort((a, b) =>
-      tagLabel(a).localeCompare(tagLabel(b), undefined, { sensitivity: "base" })
-    );
+    return [...groups.values()];
+  }
+
+  _findGroup(key) {
+    return this._groups.find((g) => g.key === key) || this._hiddenGroups.find((g) => g.key === key);
   }
 
   _errorText(err) {
@@ -337,7 +414,7 @@ class ManualVaultPanel extends HTMLElement {
 
     const filters =
       this._tab === "devices"
-        ? [["all", t.all], ["missing", t.missing], ["has", t.has_manual]]
+        ? [["all", t.all], ["missing", t.missing], ["has", t.has_manual], ["hidden", `${t.hidden} (${this._hiddenGroups.reduce((n, g) => n + g.devices.length, 0)})`]]
         : [["all", t.all], ["untagged", t.untagged], ["file_missing", t.file_missing]];
     if (!filters.some(([key]) => key === this._filter)) this._filter = "all";
     root.querySelector(".chips").innerHTML = filters
@@ -362,6 +439,7 @@ class ManualVaultPanel extends HTMLElement {
 
   _renderGroups() {
     const t = this._t;
+    if (this._filter === "hidden") return this._renderHidden();
     const groups = this._groups.filter((g) => {
       if (this._filter === "missing" && g.missing === 0) return false;
       if (this._filter === "has" && g.manuals.length === 0) return false;
@@ -402,6 +480,7 @@ class ManualVaultPanel extends HTMLElement {
                 <div class="primary-line">${esc(g.manufacturer || t.unknown)} · <b>${esc(g.model || t.unknown)}</b> ${modelIds}</div>
                 <div class="secondary-line">${esc(t.devices_count(g.devices.length))}${g.integrations.size ? " · " + [...g.integrations].map(esc).join(", ") : ""}</div>
               </div>
+              ${this._admin ? `<button class="icon-btn small" data-action="hide-menu" data-group="${esc(g.key)}" title="${esc(t.hide)}">${icon("eyeOff")}</button>` : ""}
             </div>
             <div class="group-body">
               ${manuals ? `<div class="manual-links">${manuals}</div>` : `<div class="muted">${esc(t.no_manual)}</div>`}
@@ -418,12 +497,13 @@ class ManualVaultPanel extends HTMLElement {
     const manuals = dev.manuals.map((id) => this._manualById.get(id)).filter(Boolean);
     const admin = this._admin
       ? `<button class="icon-btn small" data-action="link-device" data-device="${esc(dev.id)}" title="${esc(t.link_device)}">${icon("link")}</button>` +
+        `<button class="icon-btn small" data-action="hide-device" data-device="${esc(dev.id)}" title="${esc(t.hide_device)}">${icon("eyeOff")}</button>` +
         (dev.match === "device"
           ? `<button class="icon-btn small" data-action="unlink-device" data-device="${esc(dev.id)}" title="${esc(t.unlink)}">${icon("unlink")}</button>`
           : "")
       : "";
     return `
-      <div class="device">
+      <div class="device ${this._highlight === dev.id ? "highlight" : ""}" data-device-row="${esc(dev.id)}">
         <span class="dot ${manuals.length ? "ok" : "missing"}"></span>
         <div class="device-main">
           <div>${esc(dev.name || t.unknown)}${dev.match === "device" ? ` <span class="badge">${esc(t.linked_direct)}</span>` : ""}</div>
@@ -432,6 +512,47 @@ class ManualVaultPanel extends HTMLElement {
         </div>
         <div class="device-actions">${admin}</div>
       </div>`;
+  }
+
+  _renderHidden() {
+    const t = this._t;
+    const groups = this._hiddenGroups.filter((g) =>
+      this._matchesSearch(g.manufacturer, g.model, ...g.devices.map((d) => d.name), ...g.integrations)
+    );
+    if (!groups.length) return `<div class="empty">${esc(this._hiddenGroups.length ? t.nothing_found : t.empty_hidden)}</div>`;
+    return `<div class="note">${esc(t.hide_help)}</div>` + groups
+      .map((g) => {
+        const rows = g.devices
+          .map((dev) => {
+            const reason =
+              dev.hidden === "device" ? t.reason_device : dev.hidden === "model" ? t.reason_model : t.reason_integration(dev.integration);
+            const label =
+              dev.hidden === "integration" ? t.unhide_integration(dev.integration) : dev.hidden === "model" ? t.unhide_model : t.unhide;
+            const manuals = dev.manuals.map((id) => this._manualById.get(id)).filter(Boolean);
+            return `
+              <div class="device ${this._highlight === dev.id ? "highlight" : ""}" data-device-row="${esc(dev.id)}">
+                <span class="dot hidden-dot"></span>
+                <div class="device-main">
+                  <div>${esc(dev.name || t.unknown)} <span class="badge">${esc(reason)}</span></div>
+                  <div class="secondary-line">${[dev.area, dev.integration].filter(Boolean).map(esc).join(" · ")}</div>
+                  ${manuals.length ? `<div class="manual-links">${manuals.map((m) => this._manualLink(m)).join("")}</div>` : ""}
+                </div>
+                ${this._admin ? `<div class="device-actions"><button class="btn small" data-action="unhide" data-device="${esc(dev.id)}">${icon("eye")}<span>${esc(label)}</span></button></div>` : ""}
+              </div>`;
+          })
+          .join("");
+        return `
+          <div class="card group hidden-group">
+            <div class="group-head static">
+              <div class="group-title">
+                <div class="primary-line">${esc(g.manufacturer || t.unknown)} · <b>${esc(g.model || t.unknown)}</b></div>
+                <div class="secondary-line">${esc(t.devices_count(g.devices.length))}</div>
+              </div>
+            </div>
+            <div class="device-list">${rows}</div>
+          </div>`;
+      })
+      .join("");
   }
 
   _manualLink(m) {
@@ -491,7 +612,7 @@ class ManualVaultPanel extends HTMLElement {
     const el = ev.target.closest("[data-action]");
     if (!el || el.disabled) return;
     const a = el.dataset.action;
-    const group = el.dataset.group ? this._groups.find((g) => g.key === el.dataset.group) : null;
+    const group = el.dataset.group ? this._findGroup(el.dataset.group) : null;
     const manual = el.dataset.manual ? this._manualById.get(el.dataset.manual) : null;
     const device = el.dataset.device ? this._deviceById.get(el.dataset.device) : null;
     switch (a) {
@@ -530,6 +651,20 @@ class ManualVaultPanel extends HTMLElement {
         break;
       case "unlink-device":
         this._unlinkDevice(device);
+        break;
+      case "hide-menu":
+        ev.stopPropagation();
+        this._dialog = { kind: "hide", group };
+        this._renderDialog();
+        break;
+      case "hide-device":
+        this._setHidden({ kind: "device", device_id: device.id }, true);
+        break;
+      case "unhide":
+        if (device.hidden === "device") this._setHidden({ kind: "device", device_id: device.id }, false);
+        else if (device.hidden === "model")
+          this._setHidden({ kind: "model", manufacturer: device.manufacturer, model: device.model }, false);
+        else this._setHidden({ kind: "integration", integration: device.integration }, false);
         break;
       case "open":
         this._openFile(manual, false);
@@ -615,6 +750,17 @@ class ManualVaultPanel extends HTMLElement {
           devices: m.devices.filter((id) => id !== device.id),
         });
       }
+      this._toast(this._t.saved);
+      await this._load();
+    } catch (err) {
+      this._toast(this._errorText(err), true);
+    }
+  }
+
+  async _setHidden(target, hidden) {
+    try {
+      await this._hass.callWS({ type: "manual_vault/hide", hidden, ...target });
+      this._closeDialog();
       this._toast(this._t.saved);
       await this._load();
     } catch (err) {
@@ -728,6 +874,18 @@ class ManualVaultPanel extends HTMLElement {
       body = `<p class="muted">${esc(subject)}</p>
         <div class="pick-list">${options || `<div class="empty">${esc(t.empty_manuals)}</div>`}</div>
         <div class="dialog-error" hidden></div>`;
+      footer = `<button class="btn" data-action="dlg-cancel">${esc(t.cancel)}</button>`;
+    } else if (d.kind === "hide") {
+      const g = d.group;
+      heading = t.hide_title;
+      const options = [];
+      if (g.model || g.manufacturer) {
+        options.push(`<button class="pick" data-action="dlg-hide-model">${icon("eyeOff")}<span>${esc(t.hide_model(tagLabel(g) || t.unknown))}</span><span class="secondary-line">${esc(t.hide_model_help)}</span></button>`);
+      }
+      for (const integ of g.integrations) {
+        options.push(`<button class="pick" data-action="dlg-hide-integration" data-integration="${esc(integ)}">${icon("eyeOff")}<span>${esc(t.hide_integration(integ))}</span><span class="secondary-line">${esc(t.hide_integration_help)}</span></button>`);
+      }
+      body = `<div class="pick-list">${options.join("")}</div><p class="muted">${esc(t.hide_help)}</p><div class="dialog-error" hidden></div>`;
       footer = `<button class="btn" data-action="dlg-cancel">${esc(t.cancel)}</button>`;
     } else if (d.kind === "delete") {
       heading = t.delete;
@@ -850,6 +1008,12 @@ class ManualVaultPanel extends HTMLElement {
       }
       case "dlg-upload":
         await this._submitUpload();
+        break;
+      case "dlg-hide-model":
+        await this._setHidden({ kind: "model", manufacturer: d.group.manufacturer || "", model: d.group.model || "" }, true);
+        break;
+      case "dlg-hide-integration":
+        await this._setHidden({ kind: "integration", integration: el.dataset.integration }, true);
         break;
       case "dlg-save":
         await this._submitEdit();
@@ -1041,6 +1205,11 @@ const STYLES = `
   .device-list { border-top: 1px solid var(--divider-color); }
   .device { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px 10px 56px; border-bottom: 1px solid var(--divider-color); }
   .device:last-child { border-bottom: none; }
+  .device.highlight { background: rgba(var(--rgb-primary-color, 3, 169, 244), 0.12); box-shadow: inset 3px 0 0 var(--primary-color); }
+  .dot.hidden-dot { background: var(--disabled-text-color, #9e9e9e); }
+  .group-head.static { cursor: default; padding-bottom: 8px; }
+  .hidden-group .device { padding-left: 12px; }
+  .note { padding: 10px 12px; margin-bottom: 12px; border-radius: 8px; background: var(--secondary-background-color); color: var(--secondary-text-color); font-size: 13px; }
   .device .dot { margin-top: 6px; }
   .device-main { flex: 1; min-width: 0; }
   .device-main .manual-links { margin-top: 6px; }

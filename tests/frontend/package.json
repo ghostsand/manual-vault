@@ -1,0 +1,10 @@
+{
+  "name": "manual-vault-frontend-tests",
+  "private": true,
+  "scripts": {
+    "test": "node panel.test.js ../../custom_components/manual_vault/frontend/manual-vault-panel.js && node card.test.js ../../custom_components/manual_vault/frontend/manual-vault-card.js"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.0"
+  }
+}
