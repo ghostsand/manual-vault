@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Manual Vault",
+        "description": "Bewaar PDF-handleidingen in Home Assistant en koppel ze op model aan je apparaten. Handleidingen staan in de map `manual_vault` van je configuratie en gaan mee in backups. Open na de installatie **Manual Vault** in de zijbalk."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Manual Vault is al ingesteld."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "manual": {
+        "name": "Handleiding"
+      }
+    }
+  }
+}

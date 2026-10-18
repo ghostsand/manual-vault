@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Manual Vault",
+        "description": "Store PDF manuals in Home Assistant and link them to your devices by model. Manuals are kept in the `manual_vault` folder of your configuration and included in backups. After setup, open **Manual Vault** in the sidebar."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Manual Vault is already set up."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "manual": {
+        "name": "Manual"
+      }
+    }
+  }
+}
