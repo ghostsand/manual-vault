@@ -3,9 +3,12 @@
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/docs/faq/custom_repositories)
 [![Validate](https://github.com/ghostsand/manual-vault/actions/workflows/validate.yaml/badge.svg)](https://github.com/ghostsand/manual-vault/actions/workflows/validate.yaml)
 
+
+**DISCLAIMER: Made with help of Claude AI**
+
 Store PDF manuals in Home Assistant and link them automatically to your devices by model.
 
-Upload the manual for a Moes ZBM5-1C once, and every ZBM5-1C you have now or add later — through ZHA, Zigbee2MQTT or any other integration — gets it. Devices without a manual are flagged, with an upload button right next to them.
+Example: Upload the manual for a sonoff ZBM5-1C once, and every ZBM5-1C you have now or add later — through ZHA, Zigbee2MQTT or any other integration — gets it. Devices without a manual are flagged, with an upload button right next to them.
 
 ## Features
 
