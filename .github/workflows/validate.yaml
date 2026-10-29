@@ -28,18 +28,29 @@ jobs:
       - uses: home-assistant/actions/hassfest@master
 
   tests:
-    name: Tests
+    name: Tests (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.13 installs an older HA release, 3.14 the newest one
+        python: ["3.13", "3.14"]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python }}
       - name: Install Home Assistant test harness and matching frontend
         run: |
           pip install pytest-homeassistant-custom-component
           pip install "$(python -c "import json, os, homeassistant; p = os.path.join(os.path.dirname(homeassistant.__file__), 'components/frontend/manifest.json'); print(json.load(open(p))['requirements'][0])")"
-      - run: pytest -q
+      - name: Run tests (fail on Home Assistant deprecation warnings)
+        run: |
+          pytest -q 2>&1 | tee pytest.log
+          test "${PIPESTATUS[0]}" -eq 0
+          if grep -q "Detected that custom integration 'manual_vault'" pytest.log; then
+            echo "::error::Manual Vault uses deprecated Home Assistant APIs"; exit 1
+          fi
 
   frontend:
     name: Frontend tests

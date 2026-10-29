@@ -115,6 +115,25 @@ def is_eligible_device(device: dr.DeviceEntry) -> bool:
     return device.entry_type is None and device.disabled_by is None
 
 
+def all_devices(registry: dr.DeviceRegistry) -> list[dr.DeviceEntry]:
+    """Every device entry, on old and new Home Assistant versions.
+
+    HA 2026.10+ iterates `registry.devices` as entries and deprecates using it as
+    a mapping; older versions iterate it as device ids.
+    """
+    devices = list(registry.devices)
+    if devices and isinstance(devices[0], str):
+        return [d for i in devices if (d := registry.async_get(i)) is not None]
+    return devices
+
+
+def device_entry_id(device: dr.DeviceEntry) -> str | None:
+    """Config entry that owns a device, on old and new Home Assistant versions."""
+    if hasattr(device, "config_entry_id"):  # HA 2026.10+
+        return device.config_entry_id
+    return device.primary_config_entry or next(iter(device.config_entries), None)
+
+
 def model_key(manufacturer: str | None, model: str | None) -> tuple[str, str]:
     """Normalised (manufacturer, model) pair used to group and hide models."""
     return (_norm(manufacturer), _norm(model))
@@ -361,9 +380,7 @@ class ManualVault:
 
     def device_domain(self, device: dr.DeviceEntry) -> str:
         """Domain of the integration that owns a device."""
-        entry_id = device.primary_config_entry or next(
-            iter(device.config_entries), None
-        )
+        entry_id = device_entry_id(device)
         entry = self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
         return entry.domain if entry else ""
 
@@ -509,7 +526,7 @@ class ManualVault:
     def all_matches(self) -> dict[str, DeviceMatch]:
         """Device id -> match, for every eligible device with a manual."""
         result: dict[str, DeviceMatch] = {}
-        for device in dr.async_get(self.hass).devices.values():
+        for device in all_devices(dr.async_get(self.hass)):
             if not is_eligible_device(device):
                 continue
             if match := self.match_device(device):
@@ -528,7 +545,7 @@ class ManualVault:
         dev_reg = dr.async_get(self.hass)
         area_reg = ar.async_get(self.hass)
         devices: list[dict[str, Any]] = []
-        for device in dev_reg.devices.values():
+        for device in all_devices(dev_reg):
             if not is_eligible_device(device):
                 continue
             domain = self.device_domain(device)

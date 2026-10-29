@@ -26,7 +26,7 @@ from homeassistant.helpers.selector import (
 from homeassistant.loader import async_get_integrations
 
 from .const import DOMAIN, NAME
-from .vault import VaultError, is_eligible_device, model_key
+from .vault import VaultError, all_devices, is_eligible_device, model_key
 
 if TYPE_CHECKING:
     from .vault import ManualVault
@@ -89,7 +89,7 @@ class ManualVaultOptionsFlow(OptionsFlow):
         dev_reg = dr.async_get(self.hass)
         domains: set[str] = set(vault.hidden["integrations"])
         model_options: dict[tuple[str, str], SelectOptionDict] = {}
-        for device in dev_reg.devices.values():
+        for device in all_devices(dev_reg):
             if not is_eligible_device(device):
                 continue
             if domain := vault.device_domain(device):

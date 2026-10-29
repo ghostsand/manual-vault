@@ -94,8 +94,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ManualVaultConfigEntry) 
             vault.async_forget_device(event.data["device_id"])
             | vault.async_forget_hidden_device(event.data["device_id"])
         ):
+            # Not eager: let the registries finish handling the removal first.
             entry.async_create_background_task(
-                hass, vault.async_save(), "manual_vault_save"
+                hass, vault.async_save(), "manual_vault_save", eager_start=False
             )
         if not pending:
             pending.append(async_call_later(hass, DEVICE_DEBOUNCE_SECONDS, _fire))

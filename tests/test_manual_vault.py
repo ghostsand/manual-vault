@@ -21,6 +21,7 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.manual_vault import backup
 from custom_components.manual_vault.const import DOMAIN, MAX_FILE_SIZE
+from custom_components.manual_vault.vault import device_entry_id
 
 PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
 
@@ -146,7 +147,7 @@ async def test_upload_match_and_entities(hass: HomeAssistant, hass_client, hass_
     assert state.attributes["linked_by"] == "model"
     assert state.attributes["manuals"][0]["url"] == f"/api/manual_vault/file/{manual['id']}"
     # our entry does not take over the device
-    assert entry.entry_id not in dr.async_get(hass).async_get(switch1.id).config_entries
+    assert device_entry_id(dr.async_get(hass).async_get(switch1.id)) != entry.entry_id
 
     # same name again -> unique file name, direct link to the tuya device
     resp = await client.post(
@@ -211,6 +212,7 @@ async def test_device_removed_and_added(hass: HomeAssistant, hass_client) -> Non
         model="ZBM5-1C",
     )
     reg.async_remove_device(tuya.id)
+    await hass.async_block_till_done()
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=5))
     await hass.async_block_till_done()
     assert set(_manual_entities(hass, entry)) == {switch1.id, switch2.id, new.id}
